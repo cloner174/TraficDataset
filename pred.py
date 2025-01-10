@@ -44,32 +44,35 @@ def predict(model, dataloader, device, dataset, num_predictions=5, score_thresho
                 boxes = output['boxes'].cpu().numpy()
                 labels = output['labels'].cpu().numpy()
                 scores = output['scores'].cpu().numpy()
-
+                
                 keep = scores >= score_threshold
                 boxes = boxes[keep]
                 labels = labels[keep]
                 scores = scores[keep]
-
+                
                 ax = plt.subplot(num_predictions // 3 + 1, 3, images_so_far + 1)
                 ax.imshow(img)
                 ax.axis('off')
-
+                
                 for box, label, score in zip(boxes, labels, scores):
                     xmin, ymin, xmax, ymax = box
                     width, height = xmax - xmin, ymax - ymin
-
+                    
                     rect = patches.Rectangle((xmin, ymin), width, height, linewidth=2, edgecolor='r', facecolor='none')
                     ax.add_patch(rect)
                     class_name = idx_to_class.get(label, 'N/A')
                     if print_label:
                         ax.text(xmin, ymin - 10, f"{class_name}: {score:.2f}",
                                 fontsize=12, color='yellow', backgroundcolor='black')
-
+                
                 images_so_far += 1
+    
     plt.show()
     
 
-def predict_random(model, dataloader, device, dataset, num_predictions=5, score_threshold=0.5, is_normal_or_float = 'float', print_label = False):
+def predict_random(model, dataloader, device, dataset, 
+                   num_predictions=5, score_threshold=0.5, is_normal_or_float = 'float', 
+                   print_label = False, save = False, file_name = 'pred'):
     """
     is_normal_or_float = [ float  or  normal  or  both  or  none ]
     """
@@ -123,7 +126,9 @@ def predict_random(model, dataloader, device, dataset, num_predictions=5, score_
             if print_label:
                 ax.text(xmin, ymin - 10, f"{class_name}: {score:.2f}",
                         fontsize=12, color='yellow', backgroundcolor='black')
-            #ax.save()
+        
+        if save:
+            fig.savefig(f'{file_name}_{idx + 1}.png', bbox_inches=ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted()))
     
     plt.show()
 

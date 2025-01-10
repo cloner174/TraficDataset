@@ -2,13 +2,7 @@ import torch
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
-
-
-import torch
-from tqdm import tqdm
-import numpy as np
-import matplotlib.pyplot as plt
-
+from torchvision.ops import box_iou
 
 
 def compute_iou(box1, box2):
@@ -582,7 +576,7 @@ def evaluate_per_class_metrics(model, data_loader, device, iou_threshold=0.5, sc
     return class_metrics
 
 
-def calculate_accuracy(model, data_loader, device):
+def label_accuracy(model, data_loader, device):
     
     correct = 0
     total = 0
@@ -591,7 +585,9 @@ def calculate_accuracy(model, data_loader, device):
         for images, targets in data_loader:
             
             images = [img.to(device) for img in images]
+            
             outputs = model(images)
+            
             for i, output in enumerate(outputs):
                 
                 pred_boxes = output['boxes'].cpu().numpy()
@@ -608,5 +604,112 @@ def calculate_accuracy(model, data_loader, device):
     accuracy = correct / total * 100
     
     return accuracy
+
+
+def detection_accuracy(model, data_loader, device, iou_threshold=0.1, score_threshold=0.1, max_detections=100):
+    
+    model.eval()
+    
+    TP = 0
+    FP = 0
+    FN = 0
+    with torch.no_grad():
+        for images, targets in data_loader:
+            
+            images = list(img.to(device) for img in images)
+            
+            outputs = model(images)
+            for i in range(len(outputs)):
+                
+                pred_boxes = outputs[i]['boxes'].cpu()
+                pred_labels = outputs[i]['labels'].cpu()
+                pred_scores = outputs[i]['scores'].cpu()
+                
+                gt_boxes = targets[i]['boxes'].cpu()
+                gt_labels = targets[i]['labels'].cpu()
+                
+                keep = pred_scores >= score_threshold
+                pred_boxes = pred_boxes[keep][:max_detections]
+                pred_labels = pred_labels[keep][:max_detections]
+                pred_scores = pred_scores[keep][:max_detections]
+                
+                # no predictions, all are FN
+                if pred_boxes.size(0) == 0:
+                    FN += len(gt_boxes)
+                    continue
+                
+                # no ground truths, all pred are FP
+                if gt_boxes.size(0) == 0:
+                    FP += len(pred_boxes)
+                    continue
+                
+                # IoU between predicted and ground truth
+                ious = box_iou(pred_boxes, gt_boxes)
+                
+                # each prediction,best matching ground truth
+                matched_gt = set()
+                for pred_idx in range(ious.size(0)):
+                    
+                    gt_idx = ious[pred_idx].argmax()
+                    max_iou = ious[pred_idx][gt_idx].item()
+                    if max_iou >= iou_threshold and gt_labels[gt_idx] == pred_labels[pred_idx]:
+                        if gt_idx not in matched_gt:
+                            TP += 1
+                            matched_gt.add(gt_idx)
+                        else:
+                            
+                            FP += 1
+                
+                FN += len(gt_boxes) - len(matched_gt)
+    
+    accuracy = TP / (TP + FP + FN + 1e-6) * 100
+    
+    return accuracy
+
+
+def accuracy_(model, data_loader, device, iou_threshold=0.5, score_threshold=0.05, max_detections=100):
+    
+    model.eval()
+    
+    corrected = 0
+    total = 0
+    with torch.no_grad():
+        for batch_idx, (images, targets) in enumerate(tqdm(data_loader, desc="Evaluating Metrics")):
+            
+            images = list(img.to(device) for img in images)
+            outputs = model(images)
+            for i, output in enumerate(outputs):
+                
+                #image_id = targets[i]['image_id'].item()
+                
+                gt_boxes = targets[i]['boxes'].cpu().numpy()
+                gt_labels = targets[i]['labels'].cpu().numpy()
+                
+                ground_truths = []
+                for gt_box, gt_label in zip(gt_boxes, gt_labels):
+                    ground_truths.append({
+                        'bbox': gt_box,
+                        'label': gt_label
+                    })
+                
+                predictions = {
+                    'boxes': output['boxes'],
+                    'labels': output['labels'],
+                    'scores': output['scores']
+                }
+                
+                high_score_idxs = predictions['scores'] >= score_threshold
+                predictions['boxes'] = predictions['boxes'][high_score_idxs][:max_detections]
+                predictions['labels'] = predictions['labels'][high_score_idxs][:max_detections]
+                predictions['scores'] = predictions['scores'][high_score_idxs][:max_detections]
+                
+                matched_preds, unmatched_gts = match_predictions_to_ground_truths(predictions, ground_truths, iou_threshold)
+                
+                corrected += len(matched_preds)
+                total += len(matched_preds)
+                total += len(unmatched_gts)
+    
+    return corrected / total * 100
+
 
 #cloner174
